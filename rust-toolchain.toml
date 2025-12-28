@@ -1,0 +1,23 @@
+[toolchain]
+# Channels: stable, beta and nightly
+channel = "stable"
+
+# Components:
+# https://rust-lang.github.io/rustup/concepts/components.html
+components = [
+    "cargo",
+    "rust-std",
+    "rust-docs",
+    "rust-analyzer",
+    "clippy",
+    "rust-src",
+    "rustfmt",
+    "rustc-dev",
+    "llvm-tools",
+]
+
+# Targets:
+# https://doc.rust-lang.org/stable/rustc/platform-support.html
+targets = [ "x86_64-unknown-linux-gnu" ]
+profile = "default"
+

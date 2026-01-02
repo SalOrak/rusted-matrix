@@ -1,12 +1,16 @@
 use std::io::{self, stdout,  Stdout, Write };
-use std::thread::sleep;
 use std::{ time::{self, Duration}, cmp::min };
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use rand::{Rng, rng};
 
 use crossterm::{
-     ExecutableCommand, QueueableCommand, cursor::{self,  Hide, Show}, style::{self, Color, Stylize}, terminal::{
-        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, window_size
+    ExecutableCommand, QueueableCommand, cursor::{self,  Hide, Show}, style::{self, Color, Stylize}, terminal::{
+        Clear, ClearType, EnterAlternateScreen,  window_size, LeaveAlternateScreen
+    },
+    event::{
+        poll, read, Event, KeyCode
     }
+
 };
 
 
@@ -38,6 +42,7 @@ struct Matrix<'a> {
     tail: Tail,
     spawn_prob: u8,
     charset: &'a[u8; 52],
+    pause: bool
 }
 
 impl Matrix<'_> {
@@ -53,16 +58,21 @@ impl Matrix<'_> {
             max_cells,
             cells,
             spawn_prob,
-            charset: b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+            charset: b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+            pause: false
         }
+    }
+
+    fn set_gradiant_vector(&mut self,gradiant_colors: Vec<Color>) {
+        self.tail.gradiant_colors = gradiant_colors;
     }
 
     fn clear_background(&self,stdout: &mut Stdout) -> io::Result<()> {
         for y in 0..self.rows {
             for x in 0..self.cols {
-                    stdout.queue(cursor::MoveTo(x, y))?
-                        .queue(style::PrintStyledContent(" ".with(self.background).on(self.background)))?;
-            }
+                stdout.queue(cursor::MoveTo(x, y))?
+                    .queue(style::PrintStyledContent(self.generate_random_str().with(self.tail.gradiant_colors[0 as usize]).on(self.background)))?;
+                }
             stdout.flush()?;
         }
 
@@ -83,24 +93,25 @@ impl Matrix<'_> {
                     // Print the trail of falling cells.
                     let trail = min(cell.distance, self.tail.length);
                     for cy in (0..trail).rev() {
-                        stdout.queue(cursor::MoveTo(cell.x, cell.y - (cy as u16) ))?
-                            .queue(style::PrintStyledContent(format!("{}", self.generate_random_str()).with(self.tail.gradiant_colors[(trail - 1 - cy) as usize]).on(self.background)))?;
-                    }
+                        let grad_idx = (trail - 1 - cy) as usize;
+                        stdout.queue(cursor::MoveTo(cell.x, cell.y - (cy as u16)))?
+                            .queue(style::PrintStyledContent(format!("{}", self.generate_random_str()).with(self.tail.gradiant_colors[grad_idx]).on(self.background)))?;
+                        }
 
                     // clean trail not part of the tail anymore.
                     if self.tail.length < cell.distance {
                         let l: u16 = (self.tail.length as u16) + 1;
                         stdout.queue(cursor::MoveTo(cell.x, cell.y - l))?
-                            .queue(style::PrintStyledContent(" ".with(self.background).on(self.background)))?;
+                            .queue(style::PrintStyledContent(self.generate_random_str().with(self.tail.gradiant_colors[0 as usize]).on(self.background)))?;
                     }
                 },
                 false => {
                     // clean the trail of the dead cell
-                    let disappearing_trail = cell.y - (self.tail.length as u16) - 1;
+                    let disappearing_trail = cell.y - (self.tail.length as u16) + 1;
                     stdout.queue(cursor::MoveTo(cell.x, disappearing_trail))?
-                        .queue(style::Print(" ".with(self.background).on(self.background)))?;
-                }
-                
+                        .queue(style::PrintStyledContent(self.generate_random_str().with(self.tail.gradiant_colors[0 as usize]).on(self.background)))?;
+                    }
+
             }
         }
         stdout.flush()?;
@@ -131,9 +142,9 @@ impl Matrix<'_> {
         let mut dice = rng.random_range(0..100);
 
         let mut first = true;
-        while dice <= self.spawn_prob || first{
+        while dice <= self.spawn_prob || first {
             let x = rng.random_range(0..=self.cols);
-            let y = rng.random_range(0..=(self.rows / 10));
+            let y = rng.random_range(0..=1);
 
             let cell = Cell {
                 distance: 0,
@@ -144,6 +155,7 @@ impl Matrix<'_> {
 
             if self.cells.len() < self.max_cells {
                 self.cells.push(cell);
+            } else {
             }
 
             first = false;
@@ -158,12 +170,11 @@ fn main() -> io::Result<()> {
     let window = window_size()?;
     let mut stdout = stdout();
 
-
-    let speed = time::Duration::from_millis(70);
-    let max_cells: usize = 100;
+    let speed = time::Duration::from_millis(55);
+    let max_cells: usize = 200;
 
     // It means, it only spawns 30% of the time.
-    let spawn_prob = 30;
+    let spawn_prob = 70;
 
     let length: u8 = (window.rows as u8) / 3 ;
     let mut gradiant_colors = Vec::new();
@@ -172,12 +183,13 @@ fn main() -> io::Result<()> {
         let r = 0;
         let g = ((255 - 35)/length * i).try_into().unwrap();
         let b = 0;
-        let c:Color = Color::Rgb { r: r, g: b, b: g};
+        let c:Color = Color::Rgb { r: r, g: g, b: b};
         gradiant_colors.push(c);
     }
-    
+
     let tail = Tail{
         length,
+        // gradiant_colors: gradiant_colors.into_iter().rev().collect()
         gradiant_colors
     };
 
@@ -187,6 +199,7 @@ fn main() -> io::Result<()> {
         vec![], tail,
         spawn_prob);
 
+    enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     stdout.execute(Clear(ClearType::All))?;
     stdout.execute(Hide)?;
@@ -194,13 +207,55 @@ fn main() -> io::Result<()> {
     matrix.clear_background(&mut stdout)?;
 
     loop {
-        sleep(matrix.speed);
-        matrix.print(&mut stdout)?;
-        matrix.spawn();
-        matrix.tick();
+        if poll(matrix.speed)? {
+            match read()? {
+                Event::Key(event) => {
+                    match event.code {
+                        KeyCode::Char(c) => {
+                            match c {
+                                'b' | 'r' | 'g' => {
+                                    let mut gradiant_colors = Vec::new();
+
+                                    for i in 1..=length {
+                                        let base= 20;
+                                        let rand_color = ((255 - 5)/length * i).try_into().unwrap();
+
+                                        let color:Color; 
+
+                                        if c == 'r' {
+                                            color = Color::Rgb { r: rand_color, g: base, b: base};
+                                        }else if c ==  'g'  {
+                                            color = Color::Rgb { r: base, g: rand_color, b: base};
+                                        }else {
+                                            color= Color::Rgb { r: base, g: base, b: rand_color};
+                                        }
+
+                                        gradiant_colors.push(color);
+                                    }
+                                    matrix.set_gradiant_vector(gradiant_colors);
+                                }
+                                'q' => {
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                },
+                _ => {}
+            }
+        }
+
+        if !matrix.pause {
+            matrix.print(&mut stdout)?;
+            matrix.spawn();
+            matrix.tick();
+        }
     }
 
-    // stdout.execute(Show)?;
-    // stdout.execute(LeaveAlternateScreen)?;
-    // Ok(())
+    stdout.execute(Show)?;
+    stdout.execute(LeaveAlternateScreen)?;
+    disable_raw_mode()?;
+    Ok(())
 }
